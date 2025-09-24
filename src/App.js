@@ -8,6 +8,7 @@ import save from "./api/queries/save";
 import deleteQuery from "./api/queries/delete";
 import update from "./api/queries/update";
 import subscribe from "./api/subscribe/subscribe";
+import countTasks from "./api/functions/countTasks";
 
   const inputStyle = {
     height: 52,
@@ -56,6 +57,7 @@ import subscribe from "./api/subscribe/subscribe";
     const [showAddTask, setShowAddTask] = useState(false);
     const [showUpdateTask, setShowUpdateTask] = useState(false);
 
+    const [totalTasks, setTotalTasks] = useState(0)
     useEffect(() => {
       const currentUser = Parse.User.current();
       if (currentUser) setUser(currentUser);
@@ -64,12 +66,37 @@ import subscribe from "./api/subscribe/subscribe";
     useEffect(() => {
       if (user) {
         fetchTasks();
+        fetchTotalTasks();
       } 
     }, [user]);
 
     useEffect(() => {
       subscribe("Task").catch(err => console.log("Subscribe on Task error: ", err))
     }, []);
+
+    useEffect(() => {
+      let subscription;
+    
+      async function initSubscription() {
+        const query = new Parse.Query("Task");
+        subscription = await query.subscribe();
+    
+        subscription.on("create", () => {
+          setTotalTasks(prev => prev + 1);
+        });
+    
+        subscription.on("delete", () => {
+          setTotalTasks(prev => Math.max(prev - 1, 0));
+        });
+      }
+    
+      initSubscription();
+    
+      return () => {
+        if (subscription) subscription.unsubscribe();
+      };
+    }, []);
+    
 
     async function handleLogin(e) {
       e.preventDefault();
@@ -115,6 +142,15 @@ import subscribe from "./api/subscribe/subscribe";
           completed: task.get("completed"),
         }))
       );
+    }
+
+    async function fetchTotalTasks() {
+      try {
+        const total = await countTasks();
+        setTotalTasks(total);
+      } catch (error) {
+        console.error(error);
+      }
     }
 
     async function addTask(e) {
@@ -405,6 +441,9 @@ import subscribe from "./api/subscribe/subscribe";
                   </div>              
                 </li>
               ))}
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                <h3>Total Tasks: {totalTasks}</h3>
+              </div>
             </ul>
           )}
         </div>
