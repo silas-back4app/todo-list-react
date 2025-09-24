@@ -65,15 +65,11 @@ import countTasks from "./api/functions/countTasks";
 
     useEffect(() => {
       if (user) {
-        fetchTasks()
+        Promise.all([fetchTasks(), fetchTotalTasks()]);
       }
     }, [user]);
-    
-    useEffect(() => {
-      if (user) {
-        fetchTotalTasks()
-      }
-    }, [user]);
+
+    useEffect(() => { subscribe("Task").catch(err => console.log("Subscribe on Task error: ", err)) }, []);
 
     useEffect(() => {
       let subscription;
@@ -82,12 +78,14 @@ import countTasks from "./api/functions/countTasks";
         const query = new Parse.Query("Task");
         subscription = await query.subscribe();
     
-        subscription.on("create", () => {
-          setTotalTasks(prev => prev + 1);
-        });
+        subscription.on("create", async () => {
+          const total = await countTasks();
+          setTotalTasks(total);
+        }); 
     
-        subscription.on("delete", () => {
-          setTotalTasks(prev => Math.max(prev - 1, 0));
+        subscription.on("delete", async () => {
+          const total = await countTasks();
+          setTotalTasks(total);
         });
       }
     
@@ -442,9 +440,9 @@ import countTasks from "./api/functions/countTasks";
                   </div>              
                 </li>
               ))}
-              {/* <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <div style={{ textAlign: "center", marginBottom: 16 }}>
                 <h3>Total Tasks: {totalTasks}</h3>
-              </div> */}
+              </div>
             </ul>
           )}
         </div>
