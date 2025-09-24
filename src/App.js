@@ -76,10 +76,6 @@ import countTasks from "./api/functions/countTasks";
     }, [user]);
 
     useEffect(() => {
-      subscribe("Task").catch(err => console.log("Subscribe on Task error: ", err))
-    }, []);
-
-    useEffect(() => {
       let subscription;
     
       async function initSubscription() {
