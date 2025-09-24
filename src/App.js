@@ -442,9 +442,9 @@ import countTasks from "./api/functions/countTasks";
                   </div>              
                 </li>
               ))}
-              <div style={{ textAlign: "center", marginBottom: 16 }}>
+              {/* <div style={{ textAlign: "center", marginBottom: 16 }}>
                 <h3>Total Tasks: {totalTasks}</h3>
-              </div>
+              </div> */}
             </ul>
           )}
         </div>
