@@ -65,9 +65,8 @@ import countTasks from "./api/functions/countTasks";
 
     useEffect(() => {
       if (user) {
-        fetchTasks();
-        fetchTotalTasks();
-      } 
+        Promise.all([fetchTasks(), fetchTotalTasks()]);
+      }
     }, [user]);
 
     useEffect(() => {
