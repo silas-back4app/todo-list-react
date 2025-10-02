@@ -2,13 +2,8 @@ import React, { useState, useEffect } from "react";
 import TopBar from "./components/TopBar";
 import Parse from "./api/parseConfig";
 import Modal from "./components/Modal";
-import signUp from "./api/auth/signUp";
-import logIn from "./api/auth/logIn";
-import save from "./api/queries/save";
-import deleteQuery from "./api/queries/delete";
-import update from "./api/queries/update";
-import subscribe from "./api/subscribe/subscribe";
-import countTasks from "./api/functions/countTasks";
+import { signUp } from "./api/auth/auth";
+
 
   const inputStyle = {
     height: 52,
@@ -58,34 +53,37 @@ import countTasks from "./api/functions/countTasks";
     const [showUpdateTask, setShowUpdateTask] = useState(false);
 
     const [totalTasks, setTotalTasks] = useState(0)
+
     useEffect(() => {
       const currentUser = Parse.User.current();
-      if (currentUser) setUser(currentUser);
+      if (currentUser) {
+        setUser(currentUser);
+        fetchUserTasks();
+      }
     }, []);
 
     useEffect(() => {
-      if (user) {
-        Promise.all([fetchTasks(), fetchTotalTasks()]);
-      }
-    }, [user]);
-
-    useEffect(() => { subscribe("Task").catch(err => console.log("Subscribe on Task error: ", err)) }, []);
+      fetchUserTasks();
+    }, []);
 
     useEffect(() => {
       let subscription;
     
       async function initSubscription() {
+        const currentUser = Parse.User.current();
+        if (!currentUser) return;
+        
         const query = new Parse.Query("Task");
         subscription = await query.subscribe();
     
         subscription.on("create", async () => {
-          const total = await countTasks();
-          setTotalTasks(total);
+          const total = await Parse.Cloud.run("countTasks", {}, { sessionToken: currentUser.getSessionToken() });
+          setTotalTasks(total.count);
         }); 
     
         subscription.on("delete", async () => {
-          const total = await countTasks();
-          setTotalTasks(total);
+          const total = await await Parse.Cloud.run("countTasks", {}, { sessionToken: currentUser.getSessionToken() });
+          setTotalTasks(total.count);
         });
       }
     
@@ -100,9 +98,22 @@ import countTasks from "./api/functions/countTasks";
     async function handleLogin(e) {
       e.preventDefault();
       try {
-        const u = await logIn(login.username, login.password);
-        setUser(u);
+        const { username, password } = login;
+
+        const response = await Parse.Cloud.run("logIn", { username, password });
+
+        if (!response.success) throw new Error("Login failed");
+
+        const userLogged = await Parse.User.become(response.sessionToken);
+
+        console.log(userLogged)
+
+        setUser(userLogged);
+        setLogin({ username: "", password: "" });
+
+        fetchUserTasks();
       } catch (err) {
+        console.log("Login error: ", err);
         alert("Login failed!");
       }
     }
@@ -124,76 +135,69 @@ import countTasks from "./api/functions/countTasks";
     }
 
     const handleLogout = async () => {
-      await Parse.User.logOut();
-      setUser(null);
-      setTasks([]);
-    };
-
-    async function fetchTasks() {
-      const Task = Parse.Object.extend("Task");
-      const query = new Parse.Query(Task);
-      query.equalTo("user", Parse.User.current());
-      const results = await query.find();
-      setTasks(
-        results.map(task => ({
-          id: task.id,
-          title: task.get("title"),
-          completed: task.get("completed"),
-        }))
-      );
-    }
-
-    async function fetchTotalTasks() {
       try {
-        const total = await countTasks();
-        setTotalTasks(total);
+        const currentUser = Parse.User.current();
+        if (!currentUser) return;
+    
+        await Parse.User.logOut();
+        
+        setUser(null);
+        setShowLogin(true);
+        setTasks([]);
       } catch (error) {
-        console.error(error);
+        console.error("Error on logout:", error);
+      }     
+    };
+    
+
+    async function fetchUserTasks() {
+      try {
+        const currentUser = Parse.User.current();
+
+        const tasks = await Parse.Cloud.run("fetchUserTasks", {}, { sessionToken: currentUser.getSessionToken() });
+        const mappedTasks = tasks.map(t => t.toJSON());
+        console.log(mappedTasks)
+        setTasks(mappedTasks);
+        setTotalTasks(mappedTasks.length)
+      } catch (error) {
+        console.error("Error fetching tasks:", error);
       }
-    }
+    }   
 
     async function addTask(e) {
       e.preventDefault();
-      if (!taskTitle) return;
-
       try {
-        await save("Task", {
-          title: taskTitle,
-          completed: false,
-          user: Parse.User.current(),
-        });
+        const currentUser = Parse.User.current();
 
+        await Parse.Cloud.run("addTask", { title: taskTitle }, { sessionToken: currentUser.getSessionToken() });
+        setTaskTitle("");
         setShowAddTask(false);
-        setTaskTitle("");
-        fetchTasks();
+        fetchUserTasks();
       } catch (error) {
-        console.error("Error to save task:", error);
-        throw error;
+        console.error("Error adding task:", error);
       }
     }
-
-    async function updateTask(e) {
-      e.preventDefault();
-      if (!editingTask) return;
     
+    async function updateTask(taskId, title, completed) {
       try {
-        await update("Task", editingTask.id, { title: taskTitle });
-        setShowUpdateTask(false);
-        setEditingTask(null);
+        const currentUser = Parse.User.current();
+
+        await Parse.Cloud.run("updateTask", { taskId, title, completed }, { sessionToken: currentUser.getSessionToken() });
         setTaskTitle("");
-        fetchTasks();
+        fetchUserTasks();
       } catch (error) {
-        alert("Failed to update task: " + error.message);
+        console.error("Error updating task:", error);
       }
     }
     
-
     async function removeTask(taskId) {
       try {
-        await deleteQuery("Task", taskId);
-        fetchTasks();
+        const currentUser = Parse.User.current();
+
+        await Parse.Cloud.run("removeTask", { taskId: taskId }, { sessionToken: currentUser.getSessionToken() });
+        fetchUserTasks();
       } catch (error) {
-        alert("Failed to delete task: " + error.message);
+        console.error("Error removing task:", error);
       }
     }
 
@@ -298,7 +302,20 @@ import countTasks from "./api/functions/countTasks";
     const UpdateTaskModal = (
       <Modal open={showUpdateTask} onClose={() => setShowUpdateTask(false)}>
         <h2 style={{ textAlign: "center" }}>Update Task</h2>
-        <form onSubmit={updateTask}>
+        <form 
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (editingTask) {
+              updateTask(editingTask.objectId, taskTitle, editingTask.completed);
+              setShowUpdateTask(false);
+            }
+          }}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              updateTask();
+            }
+          }}
+        >
           <input
             style={inputStyle}
             placeholder="Task title"
@@ -340,7 +357,7 @@ import countTasks from "./api/functions/countTasks";
             paddingTop: 72,
           }}
         >
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24, gap: 10 }}>
             <button
               onClick={() => setShowAddTask(true)}
               style={buttonStyle}
@@ -348,6 +365,15 @@ import countTasks from "./api/functions/countTasks";
               <span style={{ fontSize: 26, fontWeight: "bold", lineHeight: "1" }}>+</span>
               Add
             </button>
+            {/* <button
+              onClick={() => {
+                checkTasks()
+                fetchUserTasks()
+              }}
+              style={buttonStyle}
+            >
+              Check Tasks Job
+            </button> */}
           </div>
 
           {tasks.length === 0 ? (
@@ -370,7 +396,7 @@ import countTasks from "./api/functions/countTasks";
           ) : (
             <ul style={{ padding: 0, listStyle: "none" }}>
               {tasks.map((t) => (
-                <li key={t.id} style={{
+                <li key={t.objectId} style={{
                   background: "#f3f5f7",
                   margin: "12px 0",
                   borderRadius: 8,
@@ -409,12 +435,12 @@ import countTasks from "./api/functions/countTasks";
                         gap: 0,
                         fontWeight: "bold",
                       }}
-                      onClick={() => removeTask(t.id)}
+                      onClick={() => removeTask(t.objectId)}
                     >
                       Delete
                     </button>
                     {
-                      t.completed == false ?
+                      t.completed === false ?
                         <button
                           style={{
                             ...buttonSecondary,
@@ -425,9 +451,8 @@ import countTasks from "./api/functions/countTasks";
                             gap: 0,
                             fontWeight: "bold",
                           }}
-                          onClick={() => {
-                            update("Task", t.id, { completed: true })
-                            fetchTasks()
+                          onClick={async () => {
+                            updateTask(t.objectId, `${t.title.replace(" (pending task)", "")}`, true)
                           }}
                         >
                           Complete
